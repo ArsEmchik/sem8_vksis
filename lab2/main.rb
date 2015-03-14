@@ -3,7 +3,7 @@ require 'socket'
 require 'colorize'
 
 class Node
-  OWN_PORT = 3200.freeze
+  OWN_PORT = 2000
   BUSY = 1.freeze
   NOT_BUSY = 0.freeze
 
@@ -45,9 +45,10 @@ class Node
     start
   end
 
+  # test method for check node work
   def tmp_get_msg
     while TRUE do
-      puts '='*10 + "/n" + 'Enter the message please: '
+      puts '='*20 + "\n" + 'Enter the message please: '
       @pc_message_queue << gets.chomp
     end
   end
@@ -69,7 +70,7 @@ class Node
           @prev_node.puts(generate_msg(1, n_to, pc_to, data))
         end
       elsif n_to == @node_number
-        puts 'RECEIVED: '.green + data.to_s
+        puts 'RECEIVED FOR ME: '.green + data.to_s
         if @pc_message_queue.empty?
           @prev_node.puts(generate_msg)
         else
@@ -78,6 +79,7 @@ class Node
           @prev_node.puts(generate_msg(1, n_to, pc_to, data))
         end
       elsif n_from == @node_number
+        puts 'it is not right to send yourself =)'.green
         @prev_node.puts(generate_msg)
       else
         @prev_node.puts(prev_node_message)
@@ -91,19 +93,9 @@ class Node
     "#{state}:#{n_to}:#{pc_to}:#{data}:#{@node_number}"
   end
 
-  def enter_message
-    puts '='*30 + "/n"
-    puts 'Enter the message please: '
-    @client_node.gets.chomp
-  end
-
   def get_address(str)
     host, port = str.split(":")
     return host, port.to_i
-  end
-
-  def get_pc_ip(message)
-    # some code here
   end
 
   def parse_marker(message)
@@ -112,17 +104,22 @@ class Node
   end
 
   def pc_listener
-    pc_server = TCPServer(OWN_PORT)
+    pc_server = TCPServer.new(2000 + @node_number)
+    'Im here'
 
     Thread.start(pc_server.accept) do |client, info|
-      @pc_queue << info unless @pc_queue.include? info
+      puts info
+
+      @pc_queue << client unless @pc_queue.include? info
       loop do
         message = client.gets.chomp
+        next if message.empty?
+
         if message == "exit"
           client.puts "Bye bye!"
           client.close
         else
-          @pc_message_queue << {info => message}
+          @pc_message_queue << message
         end
       end
     end
