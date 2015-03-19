@@ -73,11 +73,15 @@ class Node
   # the base method for get/send msg form previous/next node
   def start
     while sleep(1)
+      p 'Im here'
       prev_node_message = @next_node.gets.chomp
       next if prev_node_message.empty?
 
+      prev_node_message = marker_logic(prev_node_message) if @node_number == 1
+
       state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
-      puts "Get marker from #{n_from} node (to #{n_to} node) ".yellow + "Data:  #{data}".green
+      p [state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from]
+      puts "Get marker from #{n_from} node (to #{n_to} node). P/Rp: #{priority}/#{reserve_priority} ".yellow + "Data:  #{data}".green
 
       if state == BUSY
         reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
@@ -90,7 +94,7 @@ class Node
 
         if n_to == @node_number
           @pc_queue[pc_to - 1].puts data if @pc_queue[pc_to - 1]
-          reserve_priority = 0
+          reserve_priority = 0 # -
 
           if @pc_message_queue.empty?
             @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
@@ -104,12 +108,18 @@ class Node
       else
         reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
         @pc_queue[pc_to - 1].puts data if n_to == @node_number && @pc_queue[pc_to - 1]
-        @pc_queue[pc_to - 1].puts 'Package is not delivered!' if n_from == @node_number && @pc_queue[pc_to - 1]
+
+        if n_from == @node_number
+          puts 'Package is not delivered!'.red
+          @pc_queue[pc_to - 1].puts 'Package is not delivered!' if @pc_queue[pc_to - 1]
+        end
+
         @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
       end
     end
   end
 
+  # only for first node logic
   def marker_logic(prev_node_message)
     state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
     priority = reserve_priority if monitor_status == ACTIVE
