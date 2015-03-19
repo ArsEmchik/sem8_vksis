@@ -3,7 +3,7 @@ require 'socket'
 require 'colorize'
 
 class Node
-  OWN_PORT = 2000
+  OWN_PORT = 2000.freeze # use this constant if you not on localhost
   BUSY = 1.freeze
   NOT_BUSY = 0.freeze
 
@@ -28,7 +28,7 @@ class Node
     }
 
     #get info from console
-    puts 'Enter ip:host to connect to: '
+    puts 'Enter host:port to connect to: '
     @sent_host, @sent_port = get_address(gets.chomp)
     @next_node = TCPSocket.new(@sent_host, @sent_port)
 
@@ -41,7 +41,7 @@ class Node
       puts "First node: send msg #{generate_msg}"
     end
 
-    Thread.new { tmp_get_msg }
+    Thread.new { pc_listener }
     start
   end
 
@@ -53,13 +53,16 @@ class Node
     end
   end
 
+  private
+
+  # the base method for get/send msg form previous/next node
   def start
     while sleep(1)
       prev_node_message = @next_node.gets.chomp
       next if prev_node_message.empty?
 
       state, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
-      # puts "Get marker from #{n_from} node (to #{n_to} node)".yellow
+      puts "Get marker from #{n_from} node (to #{n_to} node) ".yellow + "Data:  #{data}".green
 
       if state == NOT_BUSY
         if @pc_message_queue.empty?
@@ -70,7 +73,9 @@ class Node
           @prev_node.puts(generate_msg(1, n_to, pc_to, data))
         end
       elsif n_to == @node_number
-        puts 'RECEIVED FOR ME: '.green + data.to_s
+        # puts 'RECEIVED: '.green + data.to_s
+        @pc_queue[pc_to - 1].puts data if @pc_queue[pc_to - 1]
+
         if @pc_message_queue.empty?
           @prev_node.puts(generate_msg)
         else
@@ -79,15 +84,14 @@ class Node
           @prev_node.puts(generate_msg(1, n_to, pc_to, data))
         end
       elsif n_from == @node_number
-        puts 'it is not right to send yourself =)'.green
+        puts 'Package is not delivered!'.red
+        @pc_queue[pc_to - 1].puts 'Package is not delivered!' if @pc_queue[pc_to - 1]
         @prev_node.puts(generate_msg)
       else
         @prev_node.puts(prev_node_message)
       end
     end
   end
-
-  private
 
   def generate_msg(state = 0, n_to = 0, pc_to = 0, data = 'no_data')
     "#{state}:#{n_to}:#{pc_to}:#{data}:#{@node_number}"
@@ -105,25 +109,26 @@ class Node
 
   def pc_listener
     pc_server = TCPServer.new(2000 + @node_number)
-    'Im here'
 
-    Thread.start(pc_server.accept) do |client, info|
-      puts info
+    while TRUE
+      Thread.start(pc_server.accept) do |client, info|
+        puts 'Get connection form PC!'.red
+        @pc_queue << client unless @pc_queue.include? info
 
-      @pc_queue << client unless @pc_queue.include? info
-      loop do
-        message = client.gets.chomp
-        next if message.empty?
+        loop do
+          message = client.gets.chomp
+          next if message.empty?
 
-        if message == "exit"
-          client.puts "Bye bye!"
-          client.close
-        else
-          @pc_message_queue << message
+          if message == 'exit'
+            client.puts 'Bye bye!'
+            client.close
+          else
+            @pc_message_queue << message
+          end
         end
       end
     end
   end
 end
 
-node = Node.new
+Node.new
