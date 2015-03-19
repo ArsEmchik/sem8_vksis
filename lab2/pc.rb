@@ -38,4 +38,4 @@ class PC
   end
 end
 
-pc = PC.new
+PC.new

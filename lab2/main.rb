@@ -1,19 +1,34 @@
-require 'optparse'
 require 'socket'
 require 'colorize'
 
 class Node
-  OWN_PORT = 2000
-  BUSY = 1.freeze
-  NOT_BUSY = 0.freeze
+  OWN_PORT = 2000.freeze # use this constant if you not on localhost
+  ACTIVE, BUSY = 1.freeze
+  NOT_ACTIVE, NOT_BUSY = 0.freeze
+
+  #######################################################
+  # format for marker
+  # 1) status: [BUSY, NOT_BUSY]
+  # 2) monitor_status: [ACTIVE, NOT_ACTIVE]
+  # 3) priority: [0..7]
+  # 4) reserve_priority: [0..7]
+  # 5) node_to
+  # 6) pc_to
+  # 7) data
+  # 8) node_from
+  #######################################################
 
   def initialize
     puts 'Enter NODE NUMBER to connect to: '
-    @node_number = gets.chomp.to_i
-    # puts 'Enter OWN IP to connect to: '
-    # @ip = gets.chomp
+    @node_number = input_validator { |data| data >= 1 && data <= 10 }
+
+    @is_monitor = (@node_number == 1)
+
+    puts 'Enter your node PRIORITY: '
+    @node_priority = input_validator { |data| data >= 0 && data <= 6 }
+
     puts 'Enter OWN PORT: '
-    @port = gets.chomp.to_i
+    @port = input_validator { |data| data >= 3000 && data <= 3100 }
 
     @pc_queue = []
     @pc_message_queue = []
@@ -28,7 +43,7 @@ class Node
     }
 
     #get info from console
-    puts 'Enter ip:host to connect to: '
+    puts 'Enter host:port to connect to: '
     @sent_host, @sent_port = get_address(gets.chomp)
     @next_node = TCPSocket.new(@sent_host, @sent_port)
 
@@ -36,12 +51,12 @@ class Node
       sleep(1)
     end
 
-    if @node_number == 1
+    if @is_monitor
       @prev_node.puts(generate_msg)
-      puts "First node: send msg #{generate_msg}"
+      puts "First node: send msg #{generate_msg}".green
     end
 
-    Thread.new { tmp_get_msg }
+    Thread.new { pc_listener }
     start
   end
 
@@ -53,44 +68,59 @@ class Node
     end
   end
 
+  private
+
+  # the base method for get/send msg form previous/next node
   def start
     while sleep(1)
       prev_node_message = @next_node.gets.chomp
       next if prev_node_message.empty?
 
-      state, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
-      # puts "Get marker from #{n_from} node (to #{n_to} node)".yellow
+      state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
+      puts "Get marker from #{n_from} node (to #{n_to} node) ".yellow + "Data:  #{data}".green
 
-      if state == NOT_BUSY
-        if @pc_message_queue.empty?
-          @prev_node.puts(generate_msg)
-        else
-          hole_data = @pc_message_queue.delete_at(0)
-          n_to, pc_to, data = hole_data.split(":")
-          @prev_node.puts(generate_msg(1, n_to, pc_to, data))
+      if state == BUSY
+        reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
+        @prev_node.puts(generate_msg(state, monitor_status, priority, reserve_priority, n_to, pc_to, data))
+        next
+      end
+
+      if @node_priority >= priority
+        priority = @node_priority
+
+        if n_to == @node_number
+          @pc_queue[pc_to - 1].puts data if @pc_queue[pc_to - 1]
+          reserve_priority = 0
+
+          if @pc_message_queue.empty?
+            @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
+          else
+            monitor_status = 0
+            hole_data = @pc_message_queue.first
+            n_to, pc_to, data = hole_data.split(":")
+            @prev_node.puts(generate_msg(BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
+          end
         end
-      elsif n_to == @node_number
-        puts 'RECEIVED FOR ME: '.green + data.to_s
-        if @pc_message_queue.empty?
-          @prev_node.puts(generate_msg)
-        else
-          hole_data = @pc_message_queue.first
-          n_to, pc_to, data = hole_data.split(":")
-          @prev_node.puts(generate_msg(1, n_to, pc_to, data))
-        end
-      elsif n_from == @node_number
-        puts 'it is not right to send yourself =)'.green
-        @prev_node.puts(generate_msg)
       else
-        @prev_node.puts(prev_node_message)
+        reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
+        @pc_queue[pc_to - 1].puts data if n_to == @node_number && @pc_queue[pc_to - 1]
+        @pc_queue[pc_to - 1].puts 'Package is not delivered!' if n_from == @node_number && @pc_queue[pc_to - 1]
+        @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
       end
     end
   end
 
-  private
+  def marker_logic(prev_node_message)
+    state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
+    priority = reserve_priority if monitor_status == ACTIVE
+    monitor_status = ACTIVE
+    generate_msg(state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from)
+  end
 
-  def generate_msg(state = 0, n_to = 0, pc_to = 0, data = 'no_data')
-    "#{state}:#{n_to}:#{pc_to}:#{data}:#{@node_number}"
+  def generate_msg(state = BUSY, monitor_status = ACTIVE, priority = 7,
+                   reserve_priority = 0, n_to = 0, pc_to = 0, data = 'no_data', n_from = @node_number)
+
+    "#{state}:#{monitor_status}:#{priority}:#{reserve_priority}:#{n_to}:#{pc_to}:#{data}:#{n_from}"
   end
 
   def get_address(str)
@@ -99,31 +129,40 @@ class Node
   end
 
   def parse_marker(message)
-    state, n_to, pc_to, data, n_from = message.split(":")
-    return state.to_i, n_to.to_i, pc_to.to_i, data, n_from.to_i
+    state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = message.split(":")
+    return state.to_i, monitor_status.to_i, priority.to_i, reserve_priority.to_i, n_to.to_i, pc_to.to_i, data, n_from.to_i
+  end
+
+  def input_validator
+    while TRUE
+      data = gets.chomp.to_i
+      yield(data) ? break : puts('Format error! Enter once more: ')
+    end
+    data
   end
 
   def pc_listener
     pc_server = TCPServer.new(2000 + @node_number)
-    'Im here'
 
-    Thread.start(pc_server.accept) do |client, info|
-      puts info
+    while TRUE
+      Thread.start(pc_server.accept) do |client, info|
+        puts 'Get connection form PC!'.red
+        @pc_queue << client unless @pc_queue.include? info
 
-      @pc_queue << client unless @pc_queue.include? info
-      loop do
-        message = client.gets.chomp
-        next if message.empty?
+        loop do
+          message = client.gets.chomp
+          next if message.empty?
 
-        if message == "exit"
-          client.puts "Bye bye!"
-          client.close
-        else
-          @pc_message_queue << message
+          if message == 'exit'
+            client.puts 'Bye bye!'
+            client.close
+          else
+            @pc_message_queue << message
+          end
         end
       end
     end
   end
 end
 
-node = Node.new
+Node.new
