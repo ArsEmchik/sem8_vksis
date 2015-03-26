@@ -3,9 +3,8 @@ require 'colorize'
 
 class PC
   def initialize
-    # puts 'Enter HOST to connect to: '
-    # host = gets.chomp
-    host = 'localhost'
+    puts 'Enter HOST to connect to: '
+    host = gets.chomp
     puts 'Enter PORT to connect to: '
     port = gets.chomp.to_i
 
