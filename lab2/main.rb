@@ -2,9 +2,11 @@ require 'socket'
 require 'colorize'
 
 class Node
-  OWN_PORT = 2000.freeze # use this constant if you not on localhost
-  ACTIVE, BUSY = 1.freeze
-  NOT_ACTIVE, NOT_BUSY = 0.freeze
+  OWN_PORT = 2000 # use this constant if you not on localhost
+  ACTIVE = 1.freeze
+  BUSY = 1.freeze
+  NOT_ACTIVE = 0.freeze
+  NOT_BUSY = 0.freeze
 
   #######################################################
   # format for marker
@@ -25,13 +27,20 @@ class Node
     @is_monitor = (@node_number == 1)
 
     puts 'Enter your node PRIORITY: '
-    @node_priority = input_validator { |data| data >= 0 && data <= 6 }
+    # @node_priority = input_validator { |data| data >= 0 && data <= 6 }
+    @node_priority  = @node_number
 
     puts 'Enter OWN PORT: '
-    @port = input_validator { |data| data >= 3000 && data <= 3100 }
+    # @port = input_validator { |data| data >= 3000 && data <= 3100 }
+    @port = 3000 + @node_number
+
 
     @pc_queue = []
     @pc_message_queue = []
+
+    100.times do
+      @pc_message_queue << ["1:1:from_#{@node_number}", "2:1:from_#{@node_number}"].sample
+    end
 
     @flag = true
 
@@ -44,7 +53,10 @@ class Node
 
     #get info from console
     puts 'Enter host:port to connect to: '
-    @sent_host, @sent_port = get_address(gets.chomp)
+    # @sent_host, @sent_port = get_address(gets.chomp)
+    @sent_host = 'localhost'
+    @sent_port = gets.chomp.to_i
+
     @next_node = TCPSocket.new(@sent_host, @sent_port)
 
     while @flag do
@@ -73,7 +85,6 @@ class Node
   # the base method for get/send msg form previous/next node
   def start
     while sleep(1)
-      p 'Im here'
       prev_node_message = @next_node.gets.chomp
       next if prev_node_message.empty?
 
@@ -81,40 +92,36 @@ class Node
 
       state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
       p [state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from]
-      puts "Get marker from #{n_from} node (to #{n_to} node). P/Rp: #{priority}/#{reserve_priority} ".yellow + "Data:  #{data}".green
+      puts "Marker from #{n_from} node to #{n_to} node. P/Rp: #{priority}/#{reserve_priority} ".yellow + "Data:  #{data}".green
+
+      reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
 
       if state == BUSY
-        reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
-        @prev_node.puts(generate_msg(state, monitor_status, priority, reserve_priority, n_to, pc_to, data))
-        next
+        if n_to == @node_number
+          monitor_status = ACTIVE and @pc_queue[pc_to - 1].puts data if @pc_queue[pc_to - 1]
+        elsif n_from == @node_number
+          monitor_status = ACTIVE
+          puts 'Package is not delivered!'.red
+        else
+          p 'line 102'
+          @prev_node.puts(generate_msg(BUSY, ACTIVE, priority, reserve_priority, n_to, pc_to, data, n_from))
+          next
+        end
       end
 
       if @node_priority >= priority
-        priority = @node_priority
-
-        if n_to == @node_number
-          @pc_queue[pc_to - 1].puts data if @pc_queue[pc_to - 1]
-          reserve_priority = 0 # -
-
-          if @pc_message_queue.empty?
-            @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
-          else
-            monitor_status = 0
-            hole_data = @pc_message_queue.first
-            n_to, pc_to, data = hole_data.split(":")
-            @prev_node.puts(generate_msg(BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
-          end
+        if @pc_message_queue.empty?
+          p 'line 110'
+          @prev_node.puts(generate_msg(NOT_BUSY, ACTIVE, priority, reserve_priority))
+        else
+          hole_data = @pc_message_queue.delete_at(0)
+          n_to, pc_to, data = hole_data.split(":")
+          p 'line 115'
+          @prev_node.puts(generate_msg(BUSY, NOT_ACTIVE, priority, reserve_priority, n_to, pc_to, data))
         end
       else
-        reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
-        @pc_queue[pc_to - 1].puts data if n_to == @node_number && @pc_queue[pc_to - 1]
-
-        if n_from == @node_number
-          puts 'Package is not delivered!'.red
-          @pc_queue[pc_to - 1].puts 'Package is not delivered!' if @pc_queue[pc_to - 1]
-        end
-
-        @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority, n_to, pc_to, data))
+        p 'line 119'
+        @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority))
       end
     end
   end
@@ -122,12 +129,16 @@ class Node
   # only for first node logic
   def marker_logic(prev_node_message)
     state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
-    priority = reserve_priority if monitor_status == ACTIVE
-    monitor_status = ACTIVE
+
+    if monitor_status == ACTIVE
+      priority = reserve_priority
+      reserve_priority = 0
+    end
+
     generate_msg(state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from)
   end
 
-  def generate_msg(state = BUSY, monitor_status = ACTIVE, priority = 7,
+  def generate_msg(state = NOT_BUSY, monitor_status = ACTIVE, priority = 7,
                    reserve_priority = 0, n_to = 0, pc_to = 0, data = 'no_data', n_from = @node_number)
 
     "#{state}:#{monitor_status}:#{priority}:#{reserve_priority}:#{n_to}:#{pc_to}:#{data}:#{n_from}"
