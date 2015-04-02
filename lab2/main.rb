@@ -8,6 +8,9 @@ class Node
   NOT_ACTIVE = 0.freeze
   NOT_BUSY = 0.freeze
 
+  MAX_MISS = 3.freeze
+  MAX_SEND = 3.freeze
+
   #######################################################
   # format for marker
   # 1) status: [BUSY, NOT_BUSY]
@@ -27,11 +30,10 @@ class Node
     @is_monitor = (@node_number == 1)
 
     puts 'Enter your node PRIORITY: '
-    @node_priority = input_validator { |data| data >= 0 && data <= 6 }
+    @node_priority = input_validator { |data| data >= 1 && data <= 6 }
 
     puts 'Enter OWN PORT: '
     @port = input_validator { |data| data >= 3000 && data <= 3100 }
-
 
     @pc_queue = []
     @pc_message_queue = []
@@ -80,6 +82,9 @@ class Node
 
   # the base method for get/send msg form previous/next node
   def start
+    count_miss = 0
+    count_send = 0
+
     while sleep(1)
       prev_node_message = @next_node.gets.chomp
       next if prev_node_message.empty?
@@ -88,10 +93,20 @@ class Node
 
       state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from = parse_marker(prev_node_message)
 
-      p 'Test data: ' + [state, monitor_status, priority, reserve_priority, n_to, pc_to, data, n_from].to_s
+      puts 'Start node priority' + @node_priority.to_s
       puts "Marker from #{n_from} node to #{n_to} node. P/Rp: #{priority}/#{reserve_priority} ".yellow + "Data:  #{data}".green
 
       reserve_priority = @node_priority if @node_priority > reserve_priority && !@pc_message_queue.empty?
+
+      if count_send >= MAX_SEND
+        count_send = 0
+        change_priority(:-)
+      end
+
+      if count_miss >= MAX_MISS
+        count_miss = 0
+        change_priority(:+)
+      end
 
       if state == BUSY
         if n_to == @node_number
@@ -100,6 +115,8 @@ class Node
           monitor_status = ACTIVE
           puts 'Package is not delivered!'.red
         else
+          count_miss += 1 if @node_priority < priority && !@pc_message_queue.empty? # --
+          count_send = 0
           @prev_node.puts(generate_msg(BUSY, ACTIVE, priority, reserve_priority, n_to, pc_to, data, n_from))
           next
         end
@@ -112,10 +129,35 @@ class Node
           hole_data = @pc_message_queue.delete_at(0)
           n_to, pc_to, data = hole_data.split(":")
           @prev_node.puts(generate_msg(BUSY, NOT_ACTIVE, priority, reserve_priority, n_to, pc_to, data))
+          count_send += 1
         end
       else
+        count_miss += 1 unless @pc_message_queue.empty?
         @prev_node.puts(generate_msg(NOT_BUSY, monitor_status, priority, reserve_priority))
       end
+    end
+  end
+
+  # lab 4
+  def change_priority(operator)
+    case
+      when operator == :+
+        if @node_priority < 6
+          @node_priority += 1
+          puts 'Change node priority! '.red + 'New is '.green + @node_priority.to_s.red
+        else
+          puts 'Node priority >= 6 !'.red
+        end
+      when operator == :-
+        if @node_priority > 1
+          @node_priority -= 1
+          puts 'Change node priority! '.red + 'New is '.green + @node_priority.to_s.red
+        else
+          puts 'Node priority <= 1 !'.red
+        end
+
+      else
+        puts 'Error'.red
     end
   end
 
